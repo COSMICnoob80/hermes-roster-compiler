@@ -2,7 +2,7 @@
 
 A ward roster is typed in Word, photographed, or emailed as a spreadsheet, and nobody checks it — so a doctor gets booked twice on the same night and a shift goes uncovered. This plugin reads that roster, checks it against four hard rules, and writes a clean schedule plus a readable list of what is wrong.
 
-No model, no network, no third-party packages. The same file always produces the same findings.
+No model, no network. CSV and plain-text rosters need only the standard library; `.xlsx` and `.pdf` readers import `openpyxl` and `pdfplumber` lazily. The same file always produces the same findings.
 
 ## Install
 
@@ -20,7 +20,9 @@ hermes plugins list
 
 ## What it reads
 
-CSV, or whitespace-aligned plain text. Nothing else tonight — PDF, `.xlsx` and photographed rosters are the next wave.
+CSV, whitespace-aligned plain text, Excel (`.xlsx`, first worksheet) or a text-layer PDF (ruled tables are read cell by cell).
+
+The Excel and PDF readers turn their input into the same rows the text parser already understands, so every format produces identical findings. Their libraries are imported only when a file of that type is opened: without `openpyxl` or `pdfplumber` installed, the tool returns a clear error naming the `pip install` line instead of crashing.
 
 CSV, with optional `#` metadata lines:
 
@@ -98,7 +100,8 @@ python -c "import roster_compiler, json; print(json.loads(roster_compiler.roster
 
 ## Limits
 
-- No `.xlsx`, PDF or image input (planned next; they would add `openpyxl` and `pdfplumber`).
+- Photographs and scanned images are not read; a PDF needs a text layer.
+- `.xlsx` and `.pdf` need `openpyxl` and `pdfplumber`, declared under `python_dependencies` in `plugin.yaml` so install and catalog CI provide them. Missing libraries produce an install hint, never a crash.
 - Headerless files are rejected with a parse warning rather than guessed at.
 - Public holidays, leave balances and skill mix are not checked — only the four rules above.
 

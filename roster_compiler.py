@@ -1,7 +1,9 @@
 """Roster compiler: parse, audit and export hospital duty rosters.
 
-Deterministic by design. No network, no model calls, no third-party packages.
-Every finding is reproducible from the bytes of the input file.
+Deterministic by design. No network, no model calls. CSV and plain text need
+only the standard library; .xlsx and .pdf readers import their library lazily,
+so registration and validation work without those packages installed. Every
+finding is reproducible from the bytes of the input file.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import calendar
 import csv
 import html
+import io
 import json
 import re
 from datetime import date, datetime, timedelta
@@ -92,6 +95,14 @@ _MONTH_NAMES = {
 _MONTH_NAMES.update(
     {name.casefold(): index for index, name in enumerate(calendar.month_abbr) if name}
 )
+
+_XLSX_SUFFIXES = {".xlsx", ".xlsm"}
+_PDF_SUFFIXES = {".pdf"}
+
+_INSTALL_LINES = {
+    "openpyxl": "pip install 'openpyxl>=3.1'",
+    "pdfplumber": "pip install 'pdfplumber>=0.11'",
+}
 
 
 class RosterError(Exception):
@@ -410,11 +421,138 @@ def parse_roster_text(text, source="<text>"):
     }
 
 
+def _missing_dependency(name):
+    return RosterError(
+        f"reading this format needs the {name!r} package, which is not installed. "
+        f"Install it with: {_INSTALL_LINES[name]} "
+        "(or run: hermes plugins install --install-deps <plugin>)"
+    )
+
+
+def _cell_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return _clean(str(value))
+
+
+def _trim_cells(cells):
+    trimmed = list(cells)
+    while trimmed and not trimmed[-1]:
+        trimmed.pop()
+    return trimmed
+
+
+def _xlsx_text(path):
+    """Serialize the first worksheet to CSV-ish lines for the shared parser."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise _missing_dependency("openpyxl") from exc
+
+    try:
+        workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
+    except Exception as exc:
+        raise RosterError(f"could not open {path.name} as a workbook: {exc}") from exc
+
+    try:
+        if not workbook.worksheets:
+            raise RosterError(f"{path.name} has no worksheets")
+        rows = [
+            _trim_cells([_cell_text(value) for value in row])
+            for row in workbook.worksheets[0].iter_rows(values_only=True)
+        ]
+    finally:
+        workbook.close()
+
+    width = None
+    for cells in rows:
+        mapping = _columns_from_tokens(cells) if cells else None
+        if mapping is not None:
+            width = max(mapping.values()) + 1
+            break
+    if width is None:
+        width = max((len(cells) for cells in rows), default=0)
+
+    lines = []
+    for cells in rows:
+        if not any(cells):
+            lines.append("")
+            continue
+        if len(cells) == 1:
+            meta = _metadata(cells[0].lstrip("#").strip())
+            if meta is not None and not cells[0].startswith("#"):
+                lines.append(f"# {meta[0]}: {meta[1]}")
+                continue
+            if cells[0].startswith("#"):
+                lines.append(cells[0])
+                continue
+        if len(cells) == 2:
+            meta = _metadata(f"{cells[0]}: {cells[1]}")
+            if meta is not None:
+                lines.append(f"# {meta[0]}: {meta[1]}")
+                continue
+        padded = cells + [""] * max(0, width - len(cells))
+        buffer = io.StringIO()
+        csv.writer(buffer, lineterminator="").writerow(padded)
+        lines.append(buffer.getvalue())
+    return "\n".join(lines)
+
+
+def _pdf_text(path):
+    """Extract metadata lines and table-ish rows from a PDF for the shared parser."""
+    try:
+        import pdfplumber
+    except ImportError as exc:
+        raise _missing_dependency("pdfplumber") from exc
+
+    lines = []
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text(layout=True) or ""
+                try:
+                    tables = page.extract_tables() or []
+                except Exception:
+                    tables = []
+                if not tables:
+                    lines.extend(text.splitlines())
+                    continue
+                for raw_line in text.splitlines():
+                    if _metadata(raw_line.lstrip("#").strip()):
+                        lines.append(raw_line)
+                for table in tables:
+                    for row in table:
+                        cells = [_cell_text(cell) or "-" for cell in row]
+                        if _columns_from_tokens(cells) is not None:
+                            continue
+                        lines.append("    ".join(cells))
+    except RosterError:
+        raise
+    except Exception as exc:
+        raise RosterError(f"could not read {path.name} as a PDF: {exc}") from exc
+    return "\n".join(lines)
+
+
 def read_roster(path):
     """Read and parse a roster file. Raises RosterError when it cannot be read."""
     target = Path(path).expanduser()
     if not target.is_file():
         raise RosterError(f"roster file not found: {target}")
+
+    suffix = target.suffix.casefold()
+    if suffix in _XLSX_SUFFIXES:
+        roster = parse_roster_text(_xlsx_text(target), source=target.name)
+        roster["format"] = "xlsx"
+        return roster
+    if suffix in _PDF_SUFFIXES:
+        roster = parse_roster_text(_pdf_text(target), source=target.name)
+        roster["format"] = "pdf"
+        return roster
+
     try:
         text = target.read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
@@ -594,11 +732,18 @@ def _entry_payload(entry):
     }
 
 
-def _render_html(roster, findings, summary, csv_name):
+def _render_html(roster, findings, summary, source_name):
     ward = html.escape(roster["ward"] or "Duty roster")
     month = html.escape(roster["month"] or "")
     subtitle = " \u00b7 ".join(
-        part for part in (ward, month, f"{len(roster['entries'])} entries") if part
+        part
+        for part in (
+            ward,
+            month,
+            f"{len(roster['entries'])} entries",
+            f"{len(findings)} problem{'s' if len(findings) != 1 else ''}",
+        )
+        if part
     )
 
     cards = [
@@ -695,7 +840,7 @@ def _render_html(roster, findings, summary, csv_name):
   {exceptions}
   <h2>Clean schedule</h2>
   {schedule}
-  <footer>Generated by roster-compiler from <code>{html.escape(csv_name)}</code>. Deterministic \u2014 no network, no model, input file unmodified.</footer>
+  <footer>Generated by roster-compiler from <code>{html.escape(source_name)}</code>. Deterministic \u2014 no network, no model, input file unmodified.</footer>
 </main>
 </body>
 </html>
@@ -744,7 +889,7 @@ def export_roster(path, out_path):
             )
 
     html_path.write_text(
-        _render_html(roster, findings, summarize(findings), csv_path.name),
+        _render_html(roster, findings, summarize(findings), source.name),
         encoding="utf-8",
     )
 

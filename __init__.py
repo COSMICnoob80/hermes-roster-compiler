@@ -16,17 +16,17 @@ TOOLSET = "roster_compiler"
 ROSTER_READ_SCHEMA = {
     "name": "roster_read",
     "description": (
-        "Parse a hospital duty roster file (CSV or whitespace-aligned plain text) and "
-        "return its ward, month and every shift entry as JSON. Use this first to see how "
-        "the roster was understood before auditing or exporting it. Rows the parser cannot "
-        "read are reported as warnings instead of being guessed at."
+        "Parse a hospital duty roster file (CSV, whitespace-aligned plain text, .xlsx or "
+        ".pdf) and return its ward, month and every shift entry as JSON. Use this first to "
+        "see how the roster was understood before auditing or exporting it. Rows the parser "
+        "cannot read are reported as warnings instead of being guessed at."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Path to the roster file (.csv or .txt).",
+                "description": "Path to the roster file (.csv, .txt, .xlsx or .pdf).",
             },
         },
         "required": ["path"],
@@ -46,7 +46,7 @@ ROSTER_AUDIT_SCHEMA = {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Path to the roster file (.csv or .txt).",
+                "description": "Path to the roster file (.csv, .txt, .xlsx or .pdf).",
             },
         },
         "required": ["path"],

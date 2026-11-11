@@ -1,0 +1,23 @@
+# Retyped from the paper board by the ward clerk. Spacing is rough.
+WARD: 3B, General Hospital
+MONTH: November 2026
+
+   DATE          SHIFT       ROLE            PERSON
+2026-11-01       morning     SHO             Dr. Zara Whitfield
+01/11/2026       evening     Registrar       Dr. Peter Voss
+1-11-2026        night       Consultant      Dr. Lina Farouk
+2026-11-02       morning     Registrar       Dr. Omar Haddad
+02/11/2026       evening     SHO             Dr. Zara Whitfield
+     2026/11/02  night       Registrar       Dr. Peter Voss
+2026-11-03       morning     Consultant      Dr. Priya Nadar
+03/11/2026       evening     Registrar       Dr. Omar Haddad
+2026-11-03       night       SHO             Dr. Zara Whitfield
+2026-11-04       morning     SHO             Dr. Tomas Reyes
+04/11/2026       evening     Consultant      Dr. Priya Nadar
+2026-11-04       night       Registrar       Dr. Omar Haddad
+2026-11-05       morning     Registrar       Dr. Ines Duarte
+5-11-2026        evening     SHO             Dr. Zara Whitfield
+2026/11/05       night       Consultant      Dr. Priya Nadar
+14/11/2026       late        SHO             Dr. Tomas Reyes
+31/11/2026       morning     SHO             Dr. Kwame Asante
+2026-11-06       evening     SHO             Dr. Kwame Asante
