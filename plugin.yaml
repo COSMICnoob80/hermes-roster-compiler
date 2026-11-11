@@ -1,5 +1,6 @@
 name: roster-compiler
 version: 0.1.0
+requires_hermes: ">=0.21"
 description: "Reads a hospital duty roster, checks it for uncovered shifts, double bookings, long unbroken runs and night-to-day shifts, then writes a clean CSV schedule plus a human-readable exception report."
 author: Syed Muhammad Abdullah Shah
 license: MIT
