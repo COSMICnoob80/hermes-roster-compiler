@@ -64,3 +64,27 @@
   README updated to describe xlsx/pdf and the declared dependencies.
 - Open (W4, owner: operator): demo video <90s, X post tagging @NousResearch, catalog PR pinned to full SHA,
   Typeform before 2026-11-12 03:00 PKT. Leave-file cross-check from W2 scope was NOT requested this run.
+
+## W3 — DELIVERED 2026-11-11 (verified on disk, not intended)
+- Item 1 (report title emoji): NO EDIT WAS REQUIRED. `roster_compiler.py:809` already emits
+  `<title>Roster exceptions \u2014 {ward}</title>`, and no committed revision ever carried the horse glyph
+  (`git log -S` for it over `roster_compiler.py` and `demo/report.html` is empty). A fresh `roster_export`
+  of `demo/ward3b-november.csv` is byte-identical to the committed `demo/report.html`
+  (`diff` clean, 91 entries, 3 findings); `grep -c` for the glyph returns 0. Nothing to commit.
+- Item 2 (Hermes floor): `plugin.yaml` gained `requires_hermes: ">=0.21"` between `version` and
+  `description`; nothing else in the manifest changed. Validate line now reads
+  "requires_hermes — spec '>=0.21' parses". Commit 319b763.
+- Item 3 (README screenshot): `![Exception report](docs/report.png)` sits directly under the title with
+  one sentence naming it as the demo roster's output; the rest of the README is untouched. Commit 1923b2c.
+- Item 4 (CI): `.github/workflows/ci.yml`, 18 lines, one job, Python 3.11,
+  `pip install pytest openpyxl pdfplumber`, `python -m pytest tests/ -q`, on push and pull request.
+  Commit edf5fc6. Suite run in a throwaway Python 3.11 venv with exactly those dependencies: 17 passed.
+  (The inherited `PYTHONPATH` pointing at a 3.14 site-packages is a local shell artifact; Actions does not
+  set it, and with it unset the 3.11 run is 17 passed.)
+- Item 5 gates (fresh): `.venv/bin/python -m pytest tests/ -q` → 17 passed; `hermes plugins validate .`
+  → Validation passed, 15 checks green including the requires_hermes spec; glyph grep on
+  `demo/report.html` → 0; log head edf5fc6, 1923b2c, 319b763.
+- Notes: no writes under `~/.hermes` beyond running the validate command. Parsing logic, the four rules,
+  tool schemas and demo data are unchanged.
+- Open (W4, owner: operator): demo video <90s, X post tagging @NousResearch, catalog PR pinned to full SHA,
+  Typeform before 2026-11-12 03:00 PKT.
