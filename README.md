@@ -7,7 +7,7 @@ No model, no network. CSV and plain-text rosters need only the standard library;
 ## Install
 
 ```
-hermes plugins install <owner>/hermes-roster-plugin --enable
+hermes plugins install COSMICnoob80/hermes-roster-plugin --enable
 ```
 
 Or, from a local checkout: copy this directory to `~/.hermes/plugins/roster-compiler`, then `hermes plugins enable roster-compiler`.
@@ -108,7 +108,7 @@ python -c "import roster_compiler, json; print(json.loads(roster_compiler.roster
 ## Development
 
 ```bash
-/home/cosmicnoob/.hermes/hermes-agent/venv/bin/python -m pytest tests/ -q
+python -m pytest tests/ -q
 hermes plugins validate .
 ```
 
