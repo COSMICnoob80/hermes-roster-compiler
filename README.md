@@ -8,6 +8,10 @@ A ward roster is typed in Word, photographed, or emailed as a spreadsheet, and n
 
 No model, no network. CSV and plain-text rosters need only the standard library; `.xlsx` and `.pdf` readers import `openpyxl` and `pdfplumber` lazily. The same file always produces the same findings.
 
+## Demo
+
+[docs/demo.mp4](docs/demo.mp4) — 57 seconds, real output: the audit, the three formats, the unreadable rows, the export.
+
 ## Install
 
 ```
