@@ -1,5 +1,9 @@
 # roster-compiler
 
+![Exception report](docs/report.png)
+
+This is the exception report `roster_export` writes for the demo roster.
+
 A ward roster is typed in Word, photographed, or emailed as a spreadsheet, and nobody checks it — so a doctor gets booked twice on the same night and a shift goes uncovered. This plugin reads that roster, checks it against four hard rules, and writes a clean schedule plus a readable list of what is wrong.
 
 No model, no network. CSV and plain-text rosters need only the standard library; `.xlsx` and `.pdf` readers import `openpyxl` and `pdfplumber` lazily. The same file always produces the same findings.
