@@ -305,7 +305,7 @@ def _parse_csv_rows(rows, warnings):
 
     if columns is None and not entries:
         warnings.append(_parse_warning(0, "no usable header row found in CSV roster"))
-    return entries
+    return entries, columns is not None
 
 
 def _parse_text_rows(rows, warnings):
@@ -351,7 +351,7 @@ def _parse_text_rows(rows, warnings):
         entry = _extract_entry(fields, line, warnings)
         if entry is not None:
             entries.append(entry)
-    return entries
+    return entries, columns is not None
 
 
 def _looks_like_csv(rows):
@@ -398,10 +398,10 @@ def parse_roster_text(text, source="<text>"):
 
     if _looks_like_csv(rows):
         fmt = "csv"
-        entries = _parse_csv_rows(rows, warnings)
+        entries, header_found = _parse_csv_rows(rows, warnings)
     else:
         fmt = "text"
-        entries = _parse_text_rows(rows, warnings)
+        entries, header_found = _parse_text_rows(rows, warnings)
 
     entries.sort(
         key=lambda item: (
@@ -417,6 +417,7 @@ def parse_roster_text(text, source="<text>"):
         "ward": ward,
         "month": month,
         "entries": entries,
+        "header_found": header_found,
         "warnings": warnings,
     }
 
@@ -537,27 +538,71 @@ def _pdf_text(path):
     return "\n".join(lines)
 
 
+def _sniff_error(head):
+    if head.startswith((b"\xff\xd8\xff", b"\x89PNG", b"GIF8")):
+        return (
+            "this looks like an image, not a roster: photos are not read. "
+            "Ask for a PDF with a text layer or a spreadsheet."
+        )
+    if head.startswith(b"\xd0\xcf\x11\xe0"):
+        return "this is the old .xls format: save as .xlsx (Excel 2007+) and try again"
+    return None
+
+
+def _require_entries(roster, target):
+    """A roster with zero entries is never reported as clean."""
+    if roster["entries"]:
+        return
+    if not roster["header_found"]:
+        raise RosterError(
+            f"no roster rows found in {target}: expected a header row naming "
+            "date, shift and person"
+        )
+    if not roster["warnings"]:
+        month = roster["month"] or "the given month"
+        roster["warnings"].append(
+            _parse_warning(0, f"header found but no shifts listed for {month}")
+        )
+
+
 def read_roster(path):
     """Read and parse a roster file. Raises RosterError when it cannot be read."""
     target = Path(path).expanduser()
     if not target.is_file():
         raise RosterError(f"roster file not found: {target}")
 
+    try:
+        with target.open("rb") as handle:
+            head = handle.read(8)
+    except OSError as exc:
+        raise RosterError(f"could not read {target}: {exc}") from exc
+
+    sniffed = _sniff_error(head)
+    if sniffed is not None:
+        raise RosterError(sniffed)
+
     suffix = target.suffix.casefold()
     if suffix in _XLSX_SUFFIXES:
         roster = parse_roster_text(_xlsx_text(target), source=target.name)
         roster["format"] = "xlsx"
-        return roster
-    if suffix in _PDF_SUFFIXES:
-        roster = parse_roster_text(_pdf_text(target), source=target.name)
+    elif suffix in _PDF_SUFFIXES:
+        text = _pdf_text(target)
+        if not text.strip():
+            raise RosterError(
+                "this PDF has no text layer (it is a scan): it was not read. "
+                "Export it as a spreadsheet or a text PDF."
+            )
+        roster = parse_roster_text(text, source=target.name)
         roster["format"] = "pdf"
-        return roster
+    else:
+        try:
+            text = target.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError as exc:
+            raise RosterError(f"could not read {target}: {exc}") from exc
+        roster = parse_roster_text(text, source=target.name)
 
-    try:
-        text = target.read_text(encoding="utf-8-sig", errors="replace")
-    except OSError as exc:
-        raise RosterError(f"could not read {target}: {exc}") from exc
-    return parse_roster_text(text, source=target.name)
+    _require_entries(roster, target)
+    return roster
 
 
 def _finding(kind, message, **extra):
