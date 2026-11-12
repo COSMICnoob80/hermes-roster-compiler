@@ -100,13 +100,37 @@ _XLSX_SUFFIXES = {".xlsx", ".xlsm"}
 _PDF_SUFFIXES = {".pdf"}
 
 _INSTALL_LINES = {
-    "openpyxl": "pip install 'openpyxl>=3.1'",
-    "pdfplumber": "pip install 'pdfplumber>=0.11'",
+    "openpyxl": "pip install 'openpyxl>=3.1,<4'",
+    "pdfplumber": "pip install 'pdfplumber>=0.11,<1'",
 }
 
 
 class RosterError(Exception):
     """A roster could not be read at all (missing file, unreadable bytes)."""
+
+
+def _read_block_error(target):
+    """Ask Hermes whether this absolute path is on its read denylist.
+
+    Imported lazily: outside Hermes there is no denylist to apply.
+    """
+    try:
+        from agent.file_safety import get_read_block_error
+    except ImportError:
+        return None
+    return get_read_block_error(str(target))
+
+
+def _write_denied_error(target):
+    """Ask Hermes whether this absolute path is on its write denylist.
+
+    Imported lazily: outside Hermes there is no denylist to apply.
+    """
+    try:
+        from agent.file_safety import get_write_denied_error
+    except ImportError:
+        return None
+    return get_write_denied_error(str(target))
 
 
 def _clean(value):
@@ -567,7 +591,10 @@ def _require_entries(roster, target):
 
 def read_roster(path):
     """Read and parse a roster file. Raises RosterError when it cannot be read."""
-    target = Path(path).expanduser()
+    target = Path(path).expanduser().resolve()
+    blocked = _read_block_error(target)
+    if blocked is not None:
+        raise RosterError(blocked)
     if not target.is_file():
         raise RosterError(f"roster file not found: {target}")
 
@@ -892,12 +919,12 @@ def _render_html(roster, findings, summary, source_name):
 """
 
 
-def export_roster(path, out_path):
+def export_roster(path, out_path, overwrite=False):
     """Write a clean CSV plus an HTML exception report. Returns a result dict."""
     roster, findings = audit_roster(path)
-    source = Path(path).expanduser()
+    source = Path(path).expanduser().resolve()
 
-    target = Path(out_path).expanduser()
+    target = Path(out_path).expanduser().resolve()
     if target.suffix.casefold() == ".html":
         html_path = target
         csv_path = target.with_suffix(".csv")
@@ -909,13 +936,23 @@ def export_roster(path, out_path):
         html_path = target.with_suffix(".html")
 
     for candidate in (csv_path, html_path):
-        if candidate.resolve() == source.resolve():
+        if candidate.name.startswith("."):
+            raise RosterError(f"refusing to write a hidden file: {candidate}")
+        if ".git" in candidate.parts:
+            raise RosterError(f"refusing to write inside a .git directory: {candidate}")
+        if candidate == source:
+            raise RosterError(f"refusing to overwrite the input roster: {candidate}")
+        denied = _write_denied_error(candidate)
+        if denied is not None:
+            raise RosterError(denied)
+        if not candidate.parent.is_dir():
             raise RosterError(
-                f"refusing to overwrite the input roster: {candidate.resolve()}"
+                f"output folder does not exist: {candidate.parent} (create it first)"
             )
-
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    html_path.parent.mkdir(parents=True, exist_ok=True)
+        if candidate.exists() and not overwrite:
+            raise RosterError(
+                f"refusing to overwrite {candidate}: pass overwrite: true if you mean it"
+            )
 
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
@@ -1019,7 +1056,7 @@ def roster_export(args, **kwargs):
     if not str(out_path).strip():
         return _json({"ok": False, "error": "out_path is required"})
     try:
-        result = export_roster(path, out_path)
+        result = export_roster(path, out_path, overwrite=bool(args.get("overwrite")))
     except RosterError as exc:
         return _json({"ok": False, "error": str(exc)})
     except Exception as exc:

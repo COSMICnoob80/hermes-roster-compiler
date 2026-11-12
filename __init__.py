@@ -74,6 +74,14 @@ ROSTER_EXPORT_SCHEMA = {
                     "with the same name and an .html extension."
                 ),
             },
+            "overwrite": {
+                "type": "boolean",
+                "description": (
+                    "Replace existing output files. Default false: the export refuses to "
+                    "overwrite anything."
+                ),
+                "default": False,
+            },
         },
         "required": ["path", "out_path"],
     },

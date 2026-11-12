@@ -181,6 +181,7 @@ def test_export_writes_csv_and_html_without_touching_input(tmp_path):
     )
     before = source.read_bytes()
     out = tmp_path / "out" / "schedule.csv"
+    out.parent.mkdir()
 
     result = rc.export_roster(source, out)
 

@@ -1,5 +1,5 @@
 name: roster-compiler
-version: 0.1.1
+version: 0.1.2
 requires_hermes: ">=0.21"
 description: "Reads a hospital duty roster, checks it for uncovered shifts, double bookings, long unbroken runs and night-to-day shifts, then writes a clean CSV schedule plus a human-readable exception report."
 author: Syed Muhammad Abdullah Shah
@@ -9,5 +9,5 @@ provides_tools:
   - roster_audit
   - roster_export
 python_dependencies:
-  - "openpyxl>=3.1"
-  - "pdfplumber>=0.11"
+  - "openpyxl>=3.1,<4"
+  - "pdfplumber>=0.11,<1"

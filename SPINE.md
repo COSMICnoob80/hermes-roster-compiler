@@ -105,3 +105,36 @@
   uncovered 1 / double 1 / consecutive 1 / no_rest 0 / parse_warning 0.
 - Notes: no writes under `~/.hermes` beyond running validate. Tool names, arguments, findings schema and the
   four rules are unchanged. Not pushed; parent pushes and re-pins the catalog entry.
+
+## W5 — DELIVERED 2026-11-12 (verified on disk, not intended)
+- Reviewer's two blocking asks, at the chokepoints rather than per tool:
+  - Read: `_read_block_error()` lazily imports `agent.file_safety.get_read_block_error`; `read_roster` now
+    resolves the path first and raises `RosterError` with the safety message, so `roster_read`, `roster_audit`
+    and `roster_export` all inherit it (all three reach the file only through `read_roster`).
+  - Write: `_write_denied_error()` lazily imports `get_write_denied_error`; `export_roster` checks both the CSV
+    and HTML target before either write. `mkdir(parents=True)` is gone: a missing parent is refused. An existing
+    target is refused unless `roster_export` is called with `overwrite: true` (new optional boolean in
+    `ROSTER_EXPORT_SCHEMA`, default false). The input-roster refusal is unchanged and applies regardless.
+- `plugin.yaml` 0.1.2; deps `openpyxl>=3.1,<4`, `pdfplumber>=0.11,<1` (in-code install hints matched).
+- Tests: `tests/test_safety.py` (7: denied read, denied write, overwrite refused/accepted, missing parent,
+  three demo formats × 3 findings).
+- Gate 1 `env -u PYTHONPATH .venv/bin/python -m pytest tests/ -q` → **31 passed, 2 skipped**. The 2 skips are
+  the denylist tests: that venv has no `agent` package, so the plugin correctly falls through (no denylist).
+  Same file run with `PYTHONPATH=<hermes workspace>` (real module importable) → **7 passed**.
+- Gate 2 `hermes plugins validate .` → Validation passed, 15 checks green, deps line "2 requirements from
+  manifest". NEW WARNING (catalog rule 9): "private core imports — roster_compiler.py:118
+  agent.file_safety.get_read_block_error; :130 get_write_denied_error". This is exactly the API the reviewer
+  asked for; flagging it so the parent can raise the seam with Nous rather than discover it at catalog review.
+- Gate 3 hand probe (`PYTHONPATH=<hermes workspace> .venv/bin/python`): `roster_audit ~/.hermes/.env` →
+  `ok: false`, error "Access denied: /home/cosmicnoob/.hermes/.env is a Hermes credential store…";
+  `~/.hermes/auth.json` → same, `ok: false`. No content, no `findings` key.
+- Gate 4 hand probe: `demo/ward3b-november.csv` → `ok: true`, 91 entries, 3 findings, summary
+  uncovered 1 / double 1 / consecutive 1 / no_rest 0 / parse_warning 0.
+- Incident, recorded for honesty: a write-policy probe to `~/.hermes/w5-probe.csv` was NOT denied by
+  `get_write_denied_error` (Hermes protects credential/system files, not every path under HERMES_HOME) and so
+  wrote two files. Both (`w5-probe.csv`, `w5-probe.html`) were deleted immediately; nothing else under
+  `~/.hermes` was created or modified. No probe has been written there since.
+- One existing test line changed: `tests/test_roster.py:184` gains `out.parent.mkdir()` because it used to rely
+  on the now-forbidden silent parent creation. All of its assertions are intact; no other existing test was
+  edited.
+- Not pushed; parent pushes and re-pins the catalog entry.

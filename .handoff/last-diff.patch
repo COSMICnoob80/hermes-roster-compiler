@@ -1,0 +1,348 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 54cacf7..baa8757 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,11 @@
+ # Changelog
+ 
++## 0.1.2 — 2026-11-12
++
++- Reads now respect Hermes's read denylist: a protected path (credential store, `.env`, internal cache) returns an error instead of its contents, so secrets cannot be read through the roster tools and echoed back in warnings.
++- Writes now respect Hermes's write denylist. `roster_export` also refuses to overwrite an existing file unless called with `overwrite: true`, and reports a missing output folder instead of creating it.
++- Dependency bounds narrowed to `openpyxl>=3.1,<4` and `pdfplumber>=0.11,<1`.
++
+ ## 0.1.1 — 2026-11-12
+ 
+ - A file with no readable roster rows is never reported as clean: no header is an error, and a header with no shifts below it emits a `parse_warning`, so `finding_count` is never 0.
+diff --git a/SPINE.md b/SPINE.md
+index 5aeaca1..82eb9b3 100644
+--- a/SPINE.md
++++ b/SPINE.md
+@@ -105,3 +105,36 @@
+   uncovered 1 / double 1 / consecutive 1 / no_rest 0 / parse_warning 0.
+ - Notes: no writes under `~/.hermes` beyond running validate. Tool names, arguments, findings schema and the
+   four rules are unchanged. Not pushed; parent pushes and re-pins the catalog entry.
++
++## W5 — DELIVERED 2026-11-12 (verified on disk, not intended)
++- Reviewer's two blocking asks, at the chokepoints rather than per tool:
++  - Read: `_read_block_error()` lazily imports `agent.file_safety.get_read_block_error`; `read_roster` now
++    resolves the path first and raises `RosterError` with the safety message, so `roster_read`, `roster_audit`
++    and `roster_export` all inherit it (all three reach the file only through `read_roster`).
++  - Write: `_write_denied_error()` lazily imports `get_write_denied_error`; `export_roster` checks both the CSV
++    and HTML target before either write. `mkdir(parents=True)` is gone: a missing parent is refused. An existing
++    target is refused unless `roster_export` is called with `overwrite: true` (new optional boolean in
++    `ROSTER_EXPORT_SCHEMA`, default false). The input-roster refusal is unchanged and applies regardless.
++- `plugin.yaml` 0.1.2; deps `openpyxl>=3.1,<4`, `pdfplumber>=0.11,<1` (in-code install hints matched).
++- Tests: `tests/test_safety.py` (7: denied read, denied write, overwrite refused/accepted, missing parent,
++  three demo formats × 3 findings).
++- Gate 1 `env -u PYTHONPATH .venv/bin/python -m pytest tests/ -q` → **31 passed, 2 skipped**. The 2 skips are
++  the denylist tests: that venv has no `agent` package, so the plugin correctly falls through (no denylist).
++  Same file run with `PYTHONPATH=<hermes workspace>` (real module importable) → **7 passed**.
++- Gate 2 `hermes plugins validate .` → Validation passed, 15 checks green, deps line "2 requirements from
++  manifest". NEW WARNING (catalog rule 9): "private core imports — roster_compiler.py:118
++  agent.file_safety.get_read_block_error; :130 get_write_denied_error". This is exactly the API the reviewer
++  asked for; flagging it so the parent can raise the seam with Nous rather than discover it at catalog review.
++- Gate 3 hand probe (`PYTHONPATH=<hermes workspace> .venv/bin/python`): `roster_audit ~/.hermes/.env` →
++  `ok: false`, error "Access denied: /home/cosmicnoob/.hermes/.env is a Hermes credential store…";
++  `~/.hermes/auth.json` → same, `ok: false`. No content, no `findings` key.
++- Gate 4 hand probe: `demo/ward3b-november.csv` → `ok: true`, 91 entries, 3 findings, summary
++  uncovered 1 / double 1 / consecutive 1 / no_rest 0 / parse_warning 0.
++- Incident, recorded for honesty: a write-policy probe to `~/.hermes/w5-probe.csv` was NOT denied by
++  `get_write_denied_error` (Hermes protects credential/system files, not every path under HERMES_HOME) and so
++  wrote two files. Both (`w5-probe.csv`, `w5-probe.html`) were deleted immediately; nothing else under
++  `~/.hermes` was created or modified. No probe has been written there since.
++- One existing test line changed: `tests/test_roster.py:184` gains `out.parent.mkdir()` because it used to rely
++  on the now-forbidden silent parent creation. All of its assertions are intact; no other existing test was
++  edited.
++- Not pushed; parent pushes and re-pins the catalog entry.
+diff --git a/__init__.py b/__init__.py
+index 2ed7abf..0945918 100644
+--- a/__init__.py
++++ b/__init__.py
+@@ -74,6 +74,14 @@ ROSTER_EXPORT_SCHEMA = {
+                     "with the same name and an .html extension."
+                 ),
+             },
++            "overwrite": {
++                "type": "boolean",
++                "description": (
++                    "Replace existing output files. Default false: the export refuses to "
++                    "overwrite anything."
++                ),
++                "default": False,
++            },
+         },
+         "required": ["path", "out_path"],
+     },
+diff --git a/plugin.yaml b/plugin.yaml
+index 741f62b..bccec8b 100644
+--- a/plugin.yaml
++++ b/plugin.yaml
+@@ -1,5 +1,5 @@
+ name: roster-compiler
+-version: 0.1.1
++version: 0.1.2
+ requires_hermes: ">=0.21"
+ description: "Reads a hospital duty roster, checks it for uncovered shifts, double bookings, long unbroken runs and night-to-day shifts, then writes a clean CSV schedule plus a human-readable exception report."
+ author: Syed Muhammad Abdullah Shah
+@@ -9,5 +9,5 @@ provides_tools:
+   - roster_audit
+   - roster_export
+ python_dependencies:
+-  - "openpyxl>=3.1"
+-  - "pdfplumber>=0.11"
++  - "openpyxl>=3.1,<4"
++  - "pdfplumber>=0.11,<1"
+diff --git a/roster_compiler.py b/roster_compiler.py
+index 999dfb2..dbb97c2 100644
+--- a/roster_compiler.py
++++ b/roster_compiler.py
+@@ -100,8 +100,8 @@ _XLSX_SUFFIXES = {".xlsx", ".xlsm"}
+ _PDF_SUFFIXES = {".pdf"}
+ 
+ _INSTALL_LINES = {
+-    "openpyxl": "pip install 'openpyxl>=3.1'",
+-    "pdfplumber": "pip install 'pdfplumber>=0.11'",
++    "openpyxl": "pip install 'openpyxl>=3.1,<4'",
++    "pdfplumber": "pip install 'pdfplumber>=0.11,<1'",
+ }
+ 
+ 
+@@ -109,6 +109,30 @@ class RosterError(Exception):
+     """A roster could not be read at all (missing file, unreadable bytes)."""
+ 
+ 
++def _read_block_error(target):
++    """Ask Hermes whether this absolute path is on its read denylist.
++
++    Imported lazily: outside Hermes there is no denylist to apply.
++    """
++    try:
++        from agent.file_safety import get_read_block_error
++    except ImportError:
++        return None
++    return get_read_block_error(str(target))
++
++
++def _write_denied_error(target):
++    """Ask Hermes whether this absolute path is on its write denylist.
++
++    Imported lazily: outside Hermes there is no denylist to apply.
++    """
++    try:
++        from agent.file_safety import get_write_denied_error
++    except ImportError:
++        return None
++    return get_write_denied_error(str(target))
++
++
+ def _clean(value):
+     return re.sub(r"\s+", " ", (value or "").strip())
+ 
+@@ -567,7 +591,10 @@ def _require_entries(roster, target):
+ 
+ def read_roster(path):
+     """Read and parse a roster file. Raises RosterError when it cannot be read."""
+-    target = Path(path).expanduser()
++    target = Path(path).expanduser().resolve()
++    blocked = _read_block_error(target)
++    if blocked is not None:
++        raise RosterError(blocked)
+     if not target.is_file():
+         raise RosterError(f"roster file not found: {target}")
+ 
+@@ -892,12 +919,12 @@ def _render_html(roster, findings, summary, source_name):
+ """
+ 
+ 
+-def export_roster(path, out_path):
++def export_roster(path, out_path, overwrite=False):
+     """Write a clean CSV plus an HTML exception report. Returns a result dict."""
+     roster, findings = audit_roster(path)
+-    source = Path(path).expanduser()
++    source = Path(path).expanduser().resolve()
+ 
+-    target = Path(out_path).expanduser()
++    target = Path(out_path).expanduser().resolve()
+     if target.suffix.casefold() == ".html":
+         html_path = target
+         csv_path = target.with_suffix(".csv")
+@@ -909,13 +936,19 @@ def export_roster(path, out_path):
+         html_path = target.with_suffix(".html")
+ 
+     for candidate in (csv_path, html_path):
+-        if candidate.resolve() == source.resolve():
++        if candidate == source:
++            raise RosterError(f"refusing to overwrite the input roster: {candidate}")
++        denied = _write_denied_error(candidate)
++        if denied is not None:
++            raise RosterError(denied)
++        if not candidate.parent.is_dir():
+             raise RosterError(
+-                f"refusing to overwrite the input roster: {candidate.resolve()}"
++                f"output folder does not exist: {candidate.parent} (create it first)"
++            )
++        if candidate.exists() and not overwrite:
++            raise RosterError(
++                f"refusing to overwrite {candidate}: pass overwrite: true if you mean it"
+             )
+-
+-    csv_path.parent.mkdir(parents=True, exist_ok=True)
+-    html_path.parent.mkdir(parents=True, exist_ok=True)
+ 
+     with csv_path.open("w", encoding="utf-8", newline="") as handle:
+         writer = csv.writer(handle, lineterminator="\n")
+@@ -1019,7 +1052,7 @@ def roster_export(args, **kwargs):
+     if not str(out_path).strip():
+         return _json({"ok": False, "error": "out_path is required"})
+     try:
+-        result = export_roster(path, out_path)
++        result = export_roster(path, out_path, overwrite=bool(args.get("overwrite")))
+     except RosterError as exc:
+         return _json({"ok": False, "error": str(exc)})
+     except Exception as exc:
+diff --git a/tests/test_roster.py b/tests/test_roster.py
+index dc1a3a3..26d1e47 100644
+--- a/tests/test_roster.py
++++ b/tests/test_roster.py
+@@ -181,6 +181,7 @@ def test_export_writes_csv_and_html_without_touching_input(tmp_path):
+     )
+     before = source.read_bytes()
+     out = tmp_path / "out" / "schedule.csv"
++    out.parent.mkdir()
+ 
+     result = rc.export_roster(source, out)
+ 
+diff --git a/tests/test_safety.py b/tests/test_safety.py
+new file mode 100644
+index 0000000..ba1773b
+--- /dev/null
++++ b/tests/test_safety.py
+@@ -0,0 +1,127 @@
++"""Denylist, overwrite and missing-folder safety checks for the three tools."""
++
++import json
++from pathlib import Path
++
++import pytest
++
++import roster_compiler as rc
++
++DEMO = Path(__file__).resolve().parents[1] / "demo"
++
++HEADER = "date,shift,role,person\n"
++
++
++def make_roster(tmp_path, name="roster.csv"):
++    path = tmp_path / name
++    path.write_text(
++        HEADER + "2026-11-04,evening,SHO,Dr. Priya Nadar\n", encoding="utf-8"
++    )
++    return path
++
++
++def test_denied_read_returns_error_not_content(tmp_path, monkeypatch):
++    file_safety = pytest.importorskip("agent.file_safety")
++    source = make_roster(tmp_path)
++    message = f"Access denied: {source} is a protected file"
++
++    def deny(path):
++        return message if Path(path).resolve() == source.resolve() else None
++
++    monkeypatch.setattr(file_safety, "get_read_block_error", deny)
++
++    for tool in (rc.roster_read, rc.roster_audit):
++        payload = json.loads(tool({"path": str(source)}))
++        assert payload["ok"] is False
++        assert payload["error"] == message
++        assert "entries" not in payload and "findings" not in payload
++
++    payload = json.loads(
++        rc.roster_export({"path": str(source), "out_path": str(tmp_path / "out.csv")})
++    )
++    assert payload["ok"] is False
++    assert payload["error"] == message
++    assert not (tmp_path / "out.csv").exists()
++
++
++def test_denied_write_returns_error(tmp_path, monkeypatch):
++    file_safety = pytest.importorskip("agent.file_safety")
++    source = make_roster(tmp_path)
++    out = tmp_path / "clean.csv"
++    message = f"Write denied: '{out}' is a protected system/credential file"
++
++    def deny(path):
++        return message if Path(path).resolve() == out.resolve() else None
++
++    monkeypatch.setattr(file_safety, "get_write_denied_error", deny)
++
++    payload = json.loads(
++        rc.roster_export({"path": str(source), "out_path": str(out)})
++    )
++    assert payload["ok"] is False
++    assert payload["error"] == message
++    assert not out.exists() and not out.with_suffix(".html").exists()
++
++
++def test_export_refuses_to_overwrite_without_permission(tmp_path):
++    source = make_roster(tmp_path)
++    out = tmp_path / "clean.csv"
++    out.write_text("old\n", encoding="utf-8")
++
++    payload = json.loads(
++        rc.roster_export({"path": str(source), "out_path": str(out)})
++    )
++    assert payload["ok"] is False
++    assert payload["error"] == (
++        f"refusing to overwrite {out.resolve()}: pass overwrite: true if you mean it"
++    )
++    assert out.read_text(encoding="utf-8") == "old\n"
++
++    payload = json.loads(
++        rc.roster_export(
++            {"path": str(source), "out_path": str(out), "overwrite": True}
++        )
++    )
++    assert payload["ok"] is True
++    assert out.read_text(encoding="utf-8").splitlines()[0] == (
++        "date,day,shift,role,person,status"
++    )
++
++
++def test_export_refuses_missing_parent_folder(tmp_path):
++    source = make_roster(tmp_path)
++    out = tmp_path / "missing" / "clean.csv"
++
++    payload = json.loads(
++        rc.roster_export({"path": str(source), "out_path": str(out)})
++    )
++    assert payload["ok"] is False
++    assert "does not exist" in payload["error"]
++    assert str(out.parent) in payload["error"]
++    assert not out.parent.exists()
++
++
++@pytest.mark.parametrize(
++    "name, dependency",
++    [
++        ("ward3b-november.csv", None),
++        ("ward3b-november.xlsx", "openpyxl"),
++        ("ward3b-november.pdf", "pdfplumber"),
++    ],
++)
++def test_demo_formats_still_yield_three_findings(name, dependency):
++    if dependency is not None:
++        pytest.importorskip(dependency)
++
++    payload = json.loads(rc.roster_audit({"path": str(DEMO / name)}))
++
++    assert payload["ok"] is True
++    assert payload["entry_count"] == 91
++    assert payload["finding_count"] == 3
++    assert payload["summary"] == {
++        "uncovered_shift": 1,
++        "double_booking": 1,
++        "consecutive_days": 1,
++        "no_rest_after_night": 0,
++        "parse_warning": 0,
++    }
