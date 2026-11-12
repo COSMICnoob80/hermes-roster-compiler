@@ -108,9 +108,11 @@ python -c "import roster_compiler, json; print(json.loads(roster_compiler.roster
 
 ## Limits
 
-- Photographs and scanned images are not read; a PDF needs a text layer.
+- Image files (JPEG, PNG, GIF) are refused: `this looks like an image, not a roster: photos are not read. Ask for a PDF with a text layer or a spreadsheet.`
+- A PDF with no text layer (a scan) is refused: `this PDF has no text layer (it is a scan): it was not read. Export it as a spreadsheet or a text PDF.`
+- Legacy `.xls` files are refused: `this is the old .xls format: save as .xlsx (Excel 2007+) and try again`.
 - `.xlsx` and `.pdf` need `openpyxl` and `pdfplumber`, declared under `python_dependencies` in `plugin.yaml` so install and catalog CI provide them. Missing libraries produce an install hint, never a crash.
-- Headerless files are rejected with a parse warning rather than guessed at.
+- A file with no readable rows is never reported as clean: no header is an error, and a header with no shifts below it is a `parse_warning`.
 - Public holidays, leave balances and skill mix are not checked — only the four rules above.
 
 ## Development

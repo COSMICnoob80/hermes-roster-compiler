@@ -88,3 +88,20 @@
   tool schemas and demo data are unchanged.
 - Open (W4, owner: operator): demo video <90s, X post tagging @NousResearch, catalog PR pinned to full SHA,
   Typeform before 2026-11-12 03:00 PKT.
+
+## W4 — DELIVERED 2026-11-12 (verified on disk, not intended)
+- Defect (parent-reproduced): files with zero readable rows returned `ok: true`, `entries=0`, `findings=0`.
+  An empty file was a false all-clear.
+- Fix in `roster_compiler.py`: row parsers now return `header_found`; `_sniff_error` rejects JPEG/PNG/GIF magic
+  and CFB (`\xd0\xcf\x11\xe0`) before any parsing; a `.pdf` whose extracted text is blank is refused;
+  `_require_entries` raises `no roster rows found in <path>: expected a header row naming date, shift and person`
+  when no header was found, and appends `header found but no shifts listed for <month>` when a header exists.
+- Tests: `tests/test_empty_inputs.py` — empty file, header-only warning, image (jpg/png/gif), legacy `.xls`,
+  scanned PDF, plus a parametrised proof that a no-entry file can never be `ok: true, finding_count: 0`.
+- Version `0.1.1`; README Limits and `CHANGELOG.md` updated to the real messages.
+- Gates (fresh): `env -u PYTHONPATH .venv/bin/python -m pytest tests/ -q` → 26 passed;
+  `hermes plugins validate .` → Validation passed; hand probes empty/jpg/.xls/scanned-pdf → each `ok: false`
+  with the specified message; `demo/ward3b-november.csv` → 91 entries, 3 findings, summary
+  uncovered 1 / double 1 / consecutive 1 / no_rest 0 / parse_warning 0.
+- Notes: no writes under `~/.hermes` beyond running validate. Tool names, arguments, findings schema and the
+  four rules are unchanged. Not pushed; parent pushes and re-pins the catalog entry.
